@@ -179,7 +179,7 @@ queue_backend:value("auto", translate("自动检测"))
 queue_backend:value("software", translate("软件模式 (HTB 多类)"))
 queue_backend:value("nss", translate("NSS 硬件模式"))
 queue_backend.default = "auto"
-queue_backend.description = translate("auto：IPQ807x 且检测到 NSS 模块时自动使用硬件加速队列，其余设备用软件模式。软件模式支持业务分类/策略中心；NSS 模式仅带宽整形+监控（不支持分类）。")
+queue_backend.description = translate("自动检测：IPQ807x 且检测到 NSS 模块时自动使用硬件加速队列，其余设备用软件模式。") .. '<br/>' .. translate("软件模式支持业务分类/策略中心；NSS 模式仅带宽整形+监控（不支持分类）。")
 
 -- 动态渲染 NSS 检测结果（页面加载时执行，供用户在选择后端时参考）
 do
@@ -197,7 +197,7 @@ do
     local err = tostring(nss_info.error or "")
     if err ~= "" and cfg_backend == "nss" then
         -- 强制 NSS 但检测失败：红色警告
-        queue_backend.description = '<span style="color:#d32f2f;font-weight:600;">' .. translate("警告：强制 NSS 模式但当前设备不可用") .. "：" .. util.pcdata(err) .. '</span><br/>' .. queue_backend.description
+        queue_backend.description = '<span style="color:#FF0000;font-weight:600;">' .. translate("警告：强制 NSS 模式但当前设备不可用") .. "：" .. util.pcdata(err) .. '</span><br/>' .. queue_backend.description
     elseif resolved == "nss" then
         queue_backend.description = '<span style="color:#2e7d32;">' .. translate("当前设备支持 NSS 硬件加速（") .. util.pcdata(device) .. translate("），自动模式将使用硬件队列。") .. '</span><br/>' .. queue_backend.description
     else
