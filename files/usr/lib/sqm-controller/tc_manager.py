@@ -113,11 +113,20 @@ class TCManager:
             self.run(cmd)
 
     def clear_sqm_runtime(self):
-        """停掉 sqm-scripts 管理的 NSS 队列（/etc/config/sqm 中本插件 section）。"""
+        """停掉本插件在 sqm-scripts 中的 section（不动用户其他 section 的启用状态）。"""
         self.run("uci -q set sqm.sqm_controller.enabled='0' 2>/dev/null")
         self.run("uci -q commit sqm 2>/dev/null")
-        self.run("/etc/init.d/sqm stop 2>/dev/null || true")
+        # restart 而非 stop：只让本插件 section 停用，用户其他 sqm section 保持原状
+        self.run("/etc/init.d/sqm restart 2>/dev/null || /etc/init.d/sqm stop 2>/dev/null || true")
+        return True
 
+    def setup_nss(self):
+        """NSS 模式：桥接配置到 /etc/config/sqm 并调用 sqm-scripts 启动 nss-zk.qos。"""
+        # 先清旧软件后端（HTB/IFB），避免残留队列干扰 NSS
+        self.clear_tc_rules()
+        if self.upload_kbps <= 0 and self.download_kbps <= 0:
+            self._set_last_error_details(stage="setup-nss", error="no bandwidth configured")
+            return False
     def setup_nss(self):
         """NSS 模式：桥接配置到 /etc/config/sqm 并调用 sqm-scripts 启动 nss-zk.qos。"""
         if self.upload_kbps <= 0 and self.download_kbps <= 0:
@@ -172,7 +181,8 @@ class TCManager:
                 self.logger.error("NSS queue setup failed: %s", self.last_error_details)
             return ok, "nss", info
 
-        # software 模式
+        # software 模式：先停掉 NSS 可能遗留的 sqm 实例，再清 tc 建 HTB
+        self.clear_sqm_runtime()
         ok = self.setup_htb()
         return ok, "software", info
     def setup_ifb(self):

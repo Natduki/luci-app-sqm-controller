@@ -76,6 +76,36 @@ def _read_history():
     return history
 
 
+def _write_history_jsonl(history):
+    """逐行写 JSONL（压缩/迁移专用，绝不写 JSON 数组）。"""
+    d = os.path.dirname(HISTORY_FILE)
+    if d and not os.path.isdir(d):
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
+    tmp = HISTORY_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            for item in history:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        os.replace(tmp, HISTORY_FILE)
+    except Exception:
+        pass
+
+
+def _migrate_legacy_history():
+    """若历史文件仍是旧版 JSON 数组，迁移为 JSONL（追加前调用）。"""
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            head = f.read(4096)
+    except Exception:
+        return
+    if not head or not head.lstrip().startswith("["):
+        return
+    history = _read_history()
+    if history:
+        _write_history_jsonl(history)
 def _uci_get(option, default=None):
     out = subprocess.getoutput("uci -q get " + option + " 2>/dev/null").strip()
     return out if out else default
@@ -308,7 +338,8 @@ def collect_sample(iface):
 
 
 def append_history(sample):
-    """JSONL 追加写入；行数超过阈值时压缩为最近 MAX_POINTS 条。"""
+    """JSONL 追加写入；追加前迁移旧格式；行数超阈值时压缩为最近 MAX_POINTS 条。"""
+    _migrate_legacy_history()
     d = os.path.dirname(HISTORY_FILE)
     if d and not os.path.isdir(d):
         try:
@@ -328,7 +359,7 @@ def append_history(sample):
         line_count = 0
     if line_count > COMPACT_AT:
         history = _read_history()[-MAX_POINTS:]
-        _write_json(HISTORY_FILE, history)
+        _write_history_jsonl(history)
     return _read_history()
 
 

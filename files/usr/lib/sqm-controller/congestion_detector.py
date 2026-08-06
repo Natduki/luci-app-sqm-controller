@@ -13,7 +13,7 @@ MODULE = "congestion_detector"
 VERSION = "4.0"
 ACTIVE = True
 
-MONITOR_HISTORY_FILE = "/tmp/sqm_controller_monitor_history.json"
+MONITOR_HISTORY_FILE = "/etc/sqm_controller/monitor_history.jsonl"
 MONITOR_STATE_FILE = "/tmp/sqm_controller_monitor_state.json"
 UCI_CONFIG = "/etc/config/sqm_controller"
 
@@ -46,6 +46,35 @@ def _read_json(path, default=None):
     except Exception:
         return default
 
+
+def _read_monitor_history():
+    """兼容读取监控历史：新格式 JSONL 按行解析；旧格式 JSON 数组整体解析。"""
+    try:
+        with open(MONITOR_HISTORY_FILE, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    stripped = raw.lstrip()
+    if stripped.startswith("["):
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else None
+        except Exception:
+            return None
+    history = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+            if isinstance(item, dict):
+                history.append(item)
+        except Exception:
+            continue
+    return history if history else None
 
 def _parse_uci_policy(path=None):
     """简单解析 UCI 配置中 policy 段的阈值。"""
@@ -96,7 +125,7 @@ def collect_metrics():
 
     latency 为 null 或 0 的采样点会被跳过。
     """
-    data = _read_json(MONITOR_HISTORY_FILE)
+    data = _read_monitor_history()
     metrics = {}
 
     if isinstance(data, dict):
