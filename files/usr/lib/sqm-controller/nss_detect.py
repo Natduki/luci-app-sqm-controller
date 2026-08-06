@@ -128,7 +128,7 @@ def resolve_backend(configured):
             return "nss", det
         return "software", dict(
             det,
-            error="配置为强制 NSS 模式，但检测失败：%s（已回退软件模式，未启动队列）" % det["reason"],
+            error="配置为强制 NSS 模式，但检测失败：%s（已回退软件模式运行）" % det["reason"],
         )
     if cfg == "software":
         return "software", dict(det, note="用户配置为软件模式（HTB 多类）")

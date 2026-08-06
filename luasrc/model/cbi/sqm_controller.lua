@@ -1,5 +1,6 @@
 local sys = require "luci.sys"
 local util = require "luci.util"
+local jsonc = require "luci.jsonc"
 local translate = luci.i18n.translate
 local INITD = "/etc/init.d/sqm-controller"
 
@@ -179,6 +180,30 @@ queue_backend:value("software", translate("软件模式 (HTB 多类)"))
 queue_backend:value("nss", translate("NSS 硬件模式"))
 queue_backend.default = "auto"
 queue_backend.description = translate("auto：IPQ807x 且检测到 NSS 模块时自动使用硬件加速队列，其余设备用软件模式。软件模式支持业务分类/策略中心；NSS 模式仅带宽整形+监控（不支持分类）。")
+
+-- 动态渲染 NSS 检测结果（页面加载时执行，供用户在选择后端时参考）
+do
+    local cfg_backend = tostring(trim_uci_value(sys.exec("uci -q get sqm_controller.basic_config.queue_backend 2>/dev/null")) or "auto")
+    local detect_out = sys.exec("python3 /usr/lib/sqm-controller/nss_detect.py " .. util.shellquote(cfg_backend) .. " 2>/dev/null")
+    local nss_info = {}
+    if detect_out and detect_out ~= "" then
+        local ok_parse, parsed = pcall(jsonc.parse, detect_out)
+        if ok_parse and type(parsed) == "table" then
+            nss_info = parsed
+        end
+    end
+    local device = tostring(nss_info.model or "")
+    local resolved = tostring(nss_info.resolved_backend or "")
+    local err = tostring(nss_info.error or "")
+    if err ~= "" and cfg_backend == "nss" then
+        -- 强制 NSS 但检测失败：红色警告
+        queue_backend.description = '<span style="color:#d32f2f;font-weight:600;">' .. translate("警告：强制 NSS 模式但当前设备不可用") .. "：" .. util.pcdata(err) .. '</span><br/>' .. queue_backend.description
+    elseif resolved == "nss" then
+        queue_backend.description = '<span style="color:#2e7d32;">' .. translate("当前设备支持 NSS 硬件加速（") .. util.pcdata(device) .. translate("），自动模式将使用硬件队列。") .. '</span><br/>' .. queue_backend.description
+    else
+        queue_backend.description = translate("当前设备：") .. util.pcdata(device ~= "" and device or translate("未知")) .. translate("。") .. tostring(nss_info.reason or "") .. '<br/>' .. queue_backend.description
+    end
+end
 policy = m:section(NamedSection, "policy", "policy", translate("策略设置"))
 policy.addremove = false
 
