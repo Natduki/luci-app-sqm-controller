@@ -1,0 +1,23 @@
+SQM Controller 是一个面向 OpenWrt 的智能队列管理（Smart Queue Management, SQM）控制器，
+提供图形化 LuCI Web 界面和 Python 后端，用于组织流量分类、拥塞检测、策略判断、
+带宽分配与队列下发。
+
+本项目支持 fq_codel 与 cake 两种常用队列算法，可用于缓解网络缓冲膨胀
+（Bufferbloat），提升多设备、多连接环境下的低时延体验与带宽公平性。
+
+4.0 版本的主要能力包括：
+- 支持上行与下行独立带宽设置
+- 使用 HTB + IFB 实现上下行统一整形
+- 基于 nftables + conntrack + tc filter 进行流量分类
+- 支持 DNS 映射、TLS SNI 补充识别与未知流量聚合
+- 提供 dry-run 策略评估与手动 apply 下发分离机制
+- 提供状态监控、分类统计、策略中心、自检与日志页面
+- 支持用户 DNS 规则管理与 AI 辅助规则导入闭环
+- 支持 UCI 配置持久化与 init.d / cron 运行方式
+
+适用平台：
+- OpenWrt 23.05 及以上版本
+- 需要内核支持：ifb、htb、fq_codel、cake
+
+本项目定位为独立实现的 SQM 控制器，不依赖官方 sqm-scripts，
+适合在 OpenWrt 设备上做自定义部署、调优和二次开发。

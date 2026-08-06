@@ -1,0 +1,211 @@
+<%+header%>
+
+<style>
+.sqm-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0 12px; }
+.sqm-card { border:1px solid #e5e5e5; border-radius:8px; padding:12px; margin-bottom:12px; background:#fff; }
+.sqm-log { height:420px; overflow:auto; border:1px solid #2a2a2a; border-radius:8px; background:#0f1115; color:#d6dde6; padding:10px; white-space:pre-wrap; font-family:monospace; font-size:12px; }
+.sqm-pre { max-height:420px; overflow:auto; border:1px solid #2a2a2a; border-radius:8px; background:#0f1115; color:#cfe7ff; padding:10px; white-space:pre-wrap; font-family:monospace; font-size:12px; }
+.sqm-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.sqm-maint-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; }
+.sqm-help { color:#667085; font-size:12px; line-height:1.6; margin:6px 0 0; }
+@media (max-width: 900px){ .sqm-grid{ grid-template-columns:1fr; } }
+</style>
+
+<div class="cbi-map">
+  <h2 name="content"><%:SQM Controller - 系统日志与维护%></h2>
+
+  <div class="sqm-toolbar">
+    <button class="cbi-button" onclick="loadLogs()"><%:刷新日志%></button>
+    <button class="cbi-button cbi-button-reset" onclick="clearLogs()"><%:清空日志%></button>
+    <button class="cbi-button cbi-button-apply" onclick="downloadLog()"><%:下载日志%></button>
+    <button class="cbi-button" onclick="rotateLogs()"><%:轮转日志%></button>
+    <button class="cbi-button" onclick="runSelfCheck()"><%:运行自检%></button>
+    <label><input type="checkbox" id="auto" checked onchange="toggleAuto()"> 自动刷新</label>
+    <label><input type="checkbox" id="tail" checked onchange="loadLogs()"> 仅显示最后200行</label>
+    <span id="last" style="opacity:.75">最后刷新: --</span>
+  </div>
+
+  <div class="sqm-grid">
+    <div class="sqm-card">
+      <h3>日志内容</h3>
+      <div id="log" class="sqm-log"></div>
+    </div>
+
+    <div class="sqm-card">
+      <h3>自检结果</h3>
+      <pre id="self-check" class="sqm-pre"></pre>
+    </div>
+  </div>
+
+  <div class="sqm-card">
+    <h3>配置备份 / 恢复</h3>
+    <p class="sqm-help">用于维护和迁移配置。恢复配置可能改变接口、带宽和规则；默认只导入保存，不立即重启或应用运行态。</p>
+    <div class="sqm-maint-row">
+      <button class="cbi-button" onclick="downloadBackup()">导出当前配置</button>
+    </div>
+    <div class="sqm-maint-row">
+      <input type="file" id="backup-file" />
+      <label><input type="checkbox" id="apply-now" /> 导入后立即应用</label>
+      <button class="cbi-button cbi-button-apply" onclick="restoreBackup()">导入并恢复</button>
+    </div>
+    <pre id="restore-result" class="sqm-pre" style="margin-top:10px;max-height:260px;"></pre>
+  </div>
+</div>
+
+<script>
+let timer = null;
+
+function nowText() {
+  const d = new Date();
+  const t = n => (n < 10 ? '0' + n : '' + n);
+  return t(d.getHours()) + ':' + t(d.getMinutes()) + ':' + t(d.getSeconds());
+}
+
+function toggleAuto() {
+  const enabled = document.getElementById('auto').checked;
+  if (enabled && !timer) timer = setInterval(loadLogs, 3000);
+  if (!enabled && timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+function loadLogs() {
+  fetch('<%=luci.dispatcher.build_url("admin/services/sqm_controller/get_logs")%>')
+    .then(r => r.json())
+    .then(d => {
+      let content = (d && typeof d.content === 'string') ? d.content : '';
+      if (document.getElementById('tail').checked) {
+        const lines = content.split('\n');
+        content = lines.slice(-200).join('\n');
+      }
+      const el = document.getElementById('log');
+      el.textContent = content || '无日志';
+      el.scrollTop = el.scrollHeight;
+      document.getElementById('last').innerText = '最后刷新: ' + nowText();
+    })
+    .catch(err => {
+      document.getElementById('log').textContent = '读取失败: ' + String(err);
+      document.getElementById('last').innerText = '最后刷新: ' + nowText();
+    });
+}
+
+function clearLogs() {
+  fetch('<%=luci.dispatcher.build_url("admin/services/sqm_controller/clear_logs")%>')
+    .then(r => r.json())
+    .then(() => loadLogs())
+    .catch(err => {
+      document.getElementById('log').textContent = '清空失败: ' + String(err);
+    });
+}
+
+function downloadLog() {
+  window.location = '<%=luci.dispatcher.build_url("admin/services/sqm_controller/download_log")%>';
+}
+
+function safeVal(v) {
+  if (v === undefined || v === null) return '-';
+  if (typeof v === 'boolean') return v ? '是' : '否';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+function formatChanges(changes) {
+  if (!changes || Object.keys(changes).length === 0) return '无配置变更';
+  return Object.keys(changes).sort().map(function(key) {
+    var item = changes[key] || {};
+    return key + ': ' + safeVal(item.from) + ' -> ' + safeVal(item.to);
+  }).join('\n');
+}
+
+function downloadBackup() {
+  window.location = '<%=luci.dispatcher.build_url("admin/services/sqm_controller/backup_config")%>';
+}
+
+function restoreBackup() {
+  const fileEl = document.getElementById('backup-file');
+  const outEl = document.getElementById('restore-result');
+  if (!fileEl.files || !fileEl.files.length) {
+    outEl.textContent = '请先选择备份文件';
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('backup_file', fileEl.files[0]);
+  fd.append('apply_now', document.getElementById('apply-now').checked ? '1' : '0');
+  outEl.textContent = '正在校验并恢复配置...';
+
+  fetch('<%=luci.dispatcher.build_url("admin/services/sqm_controller/restore_config")%>', {
+    method: 'POST',
+    body: fd
+  })
+    .then(r => r.json())
+    .then(d => {
+      const lines = [];
+      lines.push('恢复结果: ' + (d.success ? '成功' : '失败'));
+      if (d.error) lines.push('错误: ' + d.error);
+      if (d.backup_path) lines.push('备份文件: ' + d.backup_path);
+      if (d.validation) {
+        lines.push('校验通过: ' + (d.validation.valid ? '是' : '否'));
+        if (d.validation.errors && d.validation.errors.length) lines.push('校验错误: ' + d.validation.errors.join('; '));
+        if (d.validation.warnings && d.validation.warnings.length) lines.push('校验警告: ' + d.validation.warnings.join('; '));
+      }
+      if (d.runtime) {
+        lines.push('已应用运行态: ' + safeVal(d.runtime.applied));
+        lines.push('重启服务成功: ' + safeVal(d.runtime.restart_success));
+        lines.push('运行态说明: ' + safeVal(d.runtime.message));
+      }
+      lines.push('配置变更:');
+      lines.push(formatChanges(d.changes));
+      outEl.textContent = lines.join('\n');
+    })
+    .catch(err => {
+      outEl.textContent = '恢复失败: ' + String(err);
+    });
+}
+
+function rotateLogs() {
+  fetch('<%=luci.dispatcher.build_url("admin/services/sqm_controller/rotate_logs")%>')
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success) {
+        alert('轮转失败: ' + (d.error || d.output || '未知错误'));
+      }
+      loadLogs();
+    })
+    .catch(err => {
+      alert('轮转失败: ' + String(err));
+    });
+}
+
+function runSelfCheck() {
+  const el = document.getElementById('self-check');
+  el.textContent = '自检中...';
+  fetch('<%=luci.dispatcher.build_url("admin/services/sqm_controller/self_check")%>')
+    .then(r => r.json())
+    .then(d => {
+      if (d && d.checks) {
+        const lines = [];
+        lines.push('结果: ' + (d.success ? '成功' : '失败'));
+        lines.push('接口: ' + (d.interface || '-'));
+        lines.push('');
+        d.checks.forEach(item => {
+          lines.push('[' + (item.ok ? '通过' : '失败') + '] ' + item.name + ' - ' + (item.detail || ''));
+        });
+        el.textContent = lines.join('\n');
+      } else {
+        el.textContent = JSON.stringify(d, null, 2);
+      }
+    })
+    .catch(err => {
+      el.textContent = '自检失败: ' + String(err);
+    });
+}
+
+window.onload = function() {
+  loadLogs();
+  if (!timer) timer = setInterval(loadLogs, 3000);
+};
+</script>
+
+<%+footer%>
