@@ -8,8 +8,8 @@ import time
 
 from config_manager import ConfigManager, DEFAULT_POLICY_CRON, validate_config_file
 import firewall_manager
+import nss_detect
 from tc_manager import TCManager
-
 
 LOG_FILE = "/var/log/sqm_controller.log"
 POLICY_REPORT_FILE = "/var/log/sqm_policy.jsonl"
@@ -132,6 +132,39 @@ def check_dependencies(configured_backend):
         },
     }
 
+
+def check_nss(settings):
+    queue_backend = str(settings.get("queue_backend", "auto") or "auto").strip().lower()
+    resolved_backend, info = nss_detect.resolve_backend(queue_backend)
+    ok = True  # 检测本身不算失败：非 NSS 设备无需硬件
+    detail = info.get("reason", "")
+    if queue_backend == "nss" and not info.get("available"):
+        ok = False
+        detail = "强制 NSS 模式但检测失败：%s" % info.get("reason", "")
+    return {
+        "name": "nss",
+        "ok": ok,
+        "detail": detail,
+        "data": {
+            "configured": queue_backend,
+            "resolved_backend": resolved_backend,
+            "available": info.get("available", False),
+            "model": info.get("model", ""),
+        },
+    }
+
+
+def check_nss_tc_rules(settings):
+    iface = str(settings.get("interface", "eth0") or "eth0").strip()
+    out = run(["tc", "qdisc", "show", "dev", iface])
+    text = (out.stdout or "") + (out.stderr or "")
+    ok = bool(re.search(r"nsstbl|nssfq_codel", text))
+    return {
+        "name": "nss_tc_rules",
+        "ok": ok,
+        "detail": "nsstbl/nssfq_codel mounted" if ok else "nsstbl/nssfq_codel not found on " + iface,
+        "data": {"dev": iface, "qdisc": text[:2000]},
+    }
 
 def check_interface(settings):
     ip_cmd = find_command("ip") or "ip"
@@ -324,8 +357,16 @@ def main():
 
     checks = [
         check_dependencies(configured_backend),
+        check_nss(settings),
         check_interface(settings),
-        check_tc_rules(settings, classification_enabled),
+    ]
+    # NSS 模式用 nsstbl/nssfq_codel 检测替代 HTB 多类检测
+    resolved_backend = checks[1].get("data", {}).get("resolved_backend", "software")
+    if resolved_backend == "nss":
+        checks.append(check_nss_tc_rules(settings))
+    else:
+        checks.append(check_tc_rules(settings, classification_enabled))
+    checks += [
         check_log_rw(),
         check_validation(validation),
         check_policy_cron(cron_state, policy_enabled),
@@ -335,7 +376,7 @@ def main():
         check_policy_chain_quick(),
         check_policy_state_file(),
     ]
-    tc_check = next((item for item in checks if item.get("name") == "tc_rules"), {})
+    tc_check = next((item for item in checks if item.get("name") in ("tc_rules", "nss_tc_rules")), {})
     tc_data = tc_check.get("data", {}) if isinstance(tc_check.get("data"), dict) else {}
     success = all(item.get("ok") for item in checks)
 
@@ -345,6 +386,7 @@ def main():
         "interface": settings.get("interface", "eth0"),
         "configured_backend": configured_backend,
         "active_backend": active_backend,
+        "queue_backend": checks[1].get("data", {}).get("resolved_backend", "software"),
         "policy_cron_present": bool(cron_state.get("present")),
         "policy_cron_expression": cron_state.get("expression", DEFAULT_POLICY_CRON),
         "rule_conflicts_count": len(validation.get("rule_conflicts", [])),

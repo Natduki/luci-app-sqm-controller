@@ -28,6 +28,7 @@ import adaptive_allocator
 import congestion_detector
 import decision_state
 import dns_mapper
+import nss_detect
 import traffic_stats
 import tls_sni
 import unknown_flow_logger
@@ -1494,24 +1495,38 @@ class SQMController:
             }
 
         tc = TCManager(self.config)
-        ok = tc.setup_htb()
+        ok, queue_backend, nss_info = tc.setup_queues()
         if not ok:
             return {
                 "requested": True,
                 "enabled": True,
                 "applied": False,
                 "restart_success": False,
-                "message": "failed to apply tc rules",
+                "queue_backend": queue_backend,
+                "nss": nss_info,
+                "message": "failed to apply " + queue_backend + " queue rules",
             }
 
-        classifier_runtime = self._apply_classifier_runtime()
+        if queue_backend == "nss":
+            # NSS 硬件模式：nssfq_codel 单队列不支持业务分类，跳过分类下发
+            classifier_runtime = {
+                "requested": False,
+                "enabled": False,
+                "applied": True,
+                "message": "NSS 硬件模式不支持业务分类，已跳过分类下发",
+                "nss_skip": True,
+            }
+        else:
+            classifier_runtime = self._apply_classifier_runtime()
         if not classifier_runtime.get("requested"):
             return {
                 "requested": True,
                 "enabled": True,
                 "applied": True,
                 "restart_success": True,
-                "message": "tc rules applied",
+                "queue_backend": queue_backend,
+                "nss": nss_info,
+                "message": "queue rules applied",
                 "classifier": classifier_runtime,
             }
 
@@ -1521,6 +1536,8 @@ class SQMController:
             "enabled": True,
             "applied": classifier_ok,
             "restart_success": classifier_ok,
+            "queue_backend": queue_backend,
+            "nss": nss_info,
             "message": "tc and classifier applied" if classifier_ok else "classifier apply failed after tc setup",
             "classifier": classifier_runtime,
         }
@@ -1590,13 +1607,15 @@ class SQMController:
         ).get("stdout", "")
         wan_managed = "qdisc htb 1:" in (tc_wan or "").lower()
         ifb_managed = "qdisc htb 2:" in (tc_ifb or "").lower()
+        nss_managed = bool(re.search(r"nsstbl|nssfq_codel", (tc_wan or "") + (tc_ifb or "")))
         return {
             "iface": iface,
             "tc_wan": tc_wan,
             "tc_ifb": tc_ifb,
             "wan_managed": wan_managed,
             "ifb_managed": ifb_managed,
-            "running": wan_managed or ifb_managed,
+            "nss_managed": nss_managed,
+            "running": wan_managed or ifb_managed or nss_managed,
         }
 
     def enable(self):
@@ -1744,6 +1763,21 @@ class SQMController:
             "download_class_queues_present": tc_state.get("download_class_queues_present", False),
             "classifier_tc_complete": tc_state.get("classifier_tc_complete", False),
         })
+        # NSS 后端状态（供 LuCI 前端降级提示）
+        try:
+            qb = str(self.config.get("queue_backend", "auto") or "auto").strip().lower()
+            nss_backend, nss_info = nss_detect.resolve_backend(qb)
+            data["nss"] = {
+                "configured": qb,
+                "resolved_backend": nss_backend,
+                "available": nss_info.get("available"),
+                "model": nss_info.get("model", ""),
+                "reason": nss_info.get("reason", ""),
+                "error": nss_info.get("error", ""),
+            }
+        except Exception as exc:
+            logging.exception("nss detect failed: %s", exc)
+            data["nss"] = {"configured": "auto", "resolved_backend": "software", "available": False, "reason": "NSS 检测异常: %s" % exc}
         print(json.dumps(data, ensure_ascii=False))
 
     def rotate_logs_json(self):
@@ -2600,6 +2634,18 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         raise SystemExit(0)
     elif args.policy_apply:
+        ctl._reload_config(force=True)
+        _qb = str(ctl.config_manager.basic_config.get("queue_backend", "auto") or "auto").strip().lower()
+        _nb, _ni = nss_detect.resolve_backend(_qb)
+        if _nb == "nss":
+            result = {
+                "success": False,
+                "tc_applied": False,
+                "error": "NSS 硬件模式不支持策略中心（nssfq_codel 单队列），请切换到软件模式",
+                "stage": "policy_apply",
+            }
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            raise SystemExit(1)
         lock = _BestEffortFileLock(POLICY_ONCE_LOCK_FILE)
         if not lock.acquire():
             result = {

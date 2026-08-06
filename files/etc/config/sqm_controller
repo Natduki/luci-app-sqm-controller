@@ -5,6 +5,7 @@ config basic_config 'basic_config'
         option download_speed '1000000'
         option upload_speed '100000'
         option queue_algorithm 'fq_codel'
+	option queue_backend 'auto'
 
 config advanced_config 'advanced_config'
         option autostart '1'

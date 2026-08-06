@@ -83,6 +83,10 @@ local policy_mode_label = policy_mode_labels[policy_mode] or policy_mode
     </div>
   </div>
 
+  <div id="nss-banner" style="display:none;border:1px solid #ed6c02;border-left:4px solid #ed6c02;border-radius:8px;padding:10px 14px;background:#fff8ed;margin-bottom:12px;">
+    <b>NSS 硬件模式</b>：<span id="nss-banner-text"></span>
+  </div>
+
   <div class="sqm-overview">
     <div class="sqm-card">
       <div class="sqm-card-title">最近策略状态</div>
@@ -210,6 +214,17 @@ local policy_mode_label = policy_mode_labels[policy_mode] or policy_mode
   var RUN_URL = '<%=luci.dispatcher.build_url("admin/services/sqm_controller/policy_once")%>';
   var STATUS_URL = '<%=luci.dispatcher.build_url("admin/services/sqm_controller/get_status")%>';
 
+  // NSS 硬件模式：策略中心不可用提示
+  fetch(STATUS_URL, { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d) {
+    var nss = d && d.nss;
+    if (nss && nss.resolved_backend === "nss") {
+      var b = el("nss-banner");
+      if (b) {
+        b.style.display = "block";
+        el("nss-banner-text").textContent = "nssfq_codel 单队列不支持业务分类，策略中心仅可查看历史记录，无法下发调度。设备: " + (nss.model || "未知")
+      }
+    }
+  }).catch(function() {});
   var MODE = {
     auto:"智能自动",
     balanced:"均衡模式",

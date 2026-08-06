@@ -154,6 +154,11 @@
     <div class="sqm-page-sub">查看当前分类结果、主类流量占比、未知流量分析，以及域名规则和端口规则的工作状态。</div>
   </div>
 
+  <div id="nss-banner" style="display:none;border-left:4px solid #ed6c02;">
+    <div class="sqm-card-title">NSS 硬件模式</div>
+    <div class="sqm-sub" id="nss-banner-text"></div>
+  </div>
+
   <div class="sqm-tabs">
     <button class="sqm-tab-btn active" data-tab="tab-stats">分类统计</button>
     <button class="sqm-tab-btn" data-tab="tab-dns">域名规则</button>
@@ -654,6 +659,20 @@
   var portRulesPromise = null;
   var dnsRulesPromise = null;
 
+  // NSS 硬件模式提示：分类功能在 nssfq_codel 单队列下不可用
+  var NSS_STATUS_URL = '<%=luci.dispatcher.build_url("admin/services/sqm_controller/get_status")%>';
+  (function() {
+    fetch(NSS_STATUS_URL, { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d) {
+      var nss = d && d.nss;
+      if (nss && nss.resolved_backend === "nss") {
+        var b = el("nss-banner");
+        if (b) {
+          b.style.display = "block";
+          el("nss-banner-text").textContent = "当前为 NSS 硬件模式（nssfq_codel 单队列）：仅支持带宽整形与监控，业务分类/策略中心/分类流量统计不可用。设备: " + (nss.model || "未知")
+        }
+      }
+    }).catch(function() {});
+  })();
   function el(id) { return document.getElementById(id); }
   function asNum(v, d) { var n = Number(v); return isFinite(n) ? n : (d || 0); }
   function fmt(v, d) { var n = Number(v); return isFinite(n) ? n.toFixed(d || 2) : "--"; }

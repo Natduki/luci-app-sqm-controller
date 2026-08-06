@@ -482,7 +482,7 @@ class ConfigManager:
 
     # 已知 basic_config / advanced_config 字段白名单
     _BASIC_CONFIG_KEYS = {"enabled", "interface", "download_speed", "upload_speed",
-                          "queue_algorithm", "download_bandwidth", "upload_bandwidth"}
+                          "queue_algorithm", "download_bandwidth", "upload_bandwidth", "queue_backend"}
     _ADVANCED_CONFIG_KEYS = {"autostart", "log_level", "log_file", "ecn"}
 
     def set_value(self, key, value, section=None):

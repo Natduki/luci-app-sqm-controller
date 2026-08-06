@@ -41,7 +41,7 @@ local function restore_basic_config(snapshot)
 end
 
 local function runtime_related_basic_change(before, after)
-    local options = { "enabled", "interface", "download_speed", "upload_speed", "queue_algorithm" }
+    local options = { "enabled", "interface", "download_speed", "upload_speed", "queue_algorithm", "queue_backend" }
     for _, option in ipairs(options) do
         if tostring(before[option] or "") ~= tostring(after[option] or "") then
             return true
@@ -93,6 +93,7 @@ local function merged_basic_config(after, requested)
         download_speed = requested.download_speed or after.download_speed,
         upload_speed = requested.upload_speed or after.upload_speed,
         queue_algorithm = requested.queue_algorithm or after.queue_algorithm,
+        queue_backend = requested.queue_backend or after.queue_backend,
     }
 end
 
@@ -172,6 +173,12 @@ queue_algorithm:value("fq_codel", "fq_codel")
 queue_algorithm:value("cake", "cake")
 queue_algorithm.default = "fq_codel"
 
+queue_backend = basic:option(ListValue, "queue_backend", translate("队列后端"))
+queue_backend:value("auto", translate("自动检测"))
+queue_backend:value("software", translate("软件模式 (HTB 多类)"))
+queue_backend:value("nss", translate("NSS 硬件模式"))
+queue_backend.default = "auto"
+queue_backend.description = translate("auto：IPQ807x 且检测到 NSS 模块时自动使用硬件加速队列，其余设备用软件模式。软件模式支持业务分类/策略中心；NSS 模式仅带宽整形+监控（不支持分类）。")
 policy = m:section(NamedSection, "policy", "policy", translate("策略设置"))
 policy.addremove = false
 

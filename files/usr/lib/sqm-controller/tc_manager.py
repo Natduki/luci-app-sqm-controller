@@ -7,6 +7,11 @@
 import logging
 import re
 import subprocess
+import time
+
+import nss_detect
+
+import nss_detect
 
 # tc 命令参数全部走本地白名单校验，避免把异常值直接拼进 shell。
 _IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,15}$")
@@ -74,6 +79,10 @@ class TCManager:
         self.download_kbps = int(config.get("download_speed", config.get("download_bandwidth", 0)))
         self.algorithm = str(config.get("queue_algorithm", "fq_codel")).lower()
         self.ecn = _to_bool(config.get("ecn", True), default=True)
+        self.queue_backend = str(config.get("queue_backend", "auto")).strip().lower()
+        if self.queue_backend not in ("auto", "software", "nss"):
+            self.queue_backend = "auto"
+        self.nss_info = {}
         self.logger = logging.getLogger(__name__)
         self.last_error_details = {}
 
@@ -104,6 +113,68 @@ class TCManager:
         for cmd in cmds:
             self.run(cmd)
 
+    def clear_sqm_runtime(self):
+        """停掉 sqm-scripts 管理的 NSS 队列（/etc/config/sqm 中本插件 section）。"""
+        self.run("uci -q set sqm.sqm_controller.enabled='0' 2>/dev/null")
+        self.run("uci -q commit sqm 2>/dev/null")
+        self.run("/etc/init.d/sqm stop 2>/dev/null || true")
+
+    def setup_nss(self):
+        """NSS 模式：桥接配置到 /etc/config/sqm 并调用 sqm-scripts 启动 nss-zk.qos。"""
+        if self.upload_kbps <= 0 and self.download_kbps <= 0:
+            self._set_last_error_details(stage="setup-nss", error="no bandwidth configured")
+            return False
+
+        # 1) 写入 sqm 配置（独立 section，避免与用户 luci-app-sqm 配置互相覆盖）
+        uci_cmds = [
+            "uci -q set sqm.sqm_controller=queue",
+            f"uci -q set sqm.sqm_controller.interface='{self.interface}'",
+            f"uci -q set sqm.sqm_controller.enabled='1'",
+            f"uci -q set sqm.sqm_controller.download='{max(self.download_kbps, 0)}'",
+            f"uci -q set sqm.sqm_controller.upload='{max(self.upload_kbps, 0)}'",
+            "uci -q set sqm.sqm_controller.qdisc='nss-zk.qos'",
+            "uci -q set sqm.sqm_controller.script='simple.qos'",
+            "uci -q set sqm.sqm_controller.algorithm='fq_codel'",
+            "uci -q commit sqm",
+        ]
+        for cmd in uci_cmds:
+            result = self.run(cmd)
+            if result.returncode != 0:
+                self._set_last_error_details(stage="setup-nss-uci", cmd=cmd, returncode=result.returncode, stderr=(result.stderr or "").strip())
+                self.logger.error("setup_nss uci failed: %s -> %s", cmd, (result.stderr or "").strip())
+                return False
+
+        # 2) 调用 sqm-scripts 启动（内部会调 nss-zk.qos start）
+        result = self.run("/etc/init.d/sqm restart 2>&1 || /etc/init.d/sqm start 2>&1")
+        if result.returncode != 0:
+            self._set_last_error_details(stage="setup-nss-sqm", returncode=result.returncode, stdout=(result.stdout or "").strip(), stderr=(result.stderr or "").strip())
+            return False
+
+        # 3) 验证 nsstbl / nssfq_codel 已挂载
+        time.sleep(1)
+        qdisc_out = self._capture_output(f"tc qdisc show dev {self.interface}") + self._capture_output("tc qdisc show dev ifb0 2>/dev/null")
+        if not re.search(r"nsstbl|nssfq_codel", qdisc_out):
+            self._set_last_error_details(stage="setup-nss-verify", output=qdisc_out[:2000])
+            self.logger.error("setup_nss verify failed: no nsstbl/nssfq_codel qdisc found");
+            return False
+
+        return True
+
+    def setup_queues(self):
+        """队列总入口：根据 queue_backend 配置 + NSS 检测决定实际后端。"""
+        backend, info = nss_detect.resolve_backend(self.queue_backend)
+        self.nss_info = info
+        self.logger.info("queue backend resolved: %s (%s)", backend, info.get("reason", ""))
+
+        if backend == "nss":
+            ok = self.setup_nss()
+            if not ok:
+                self.logger.error("NSS queue setup failed: %s", self.last_error_details)
+            return ok, "nss", info
+
+        # software 模式
+        ok = self.setup_htb()
+        return ok, "software", info
     def setup_ifb(self):
         self.run("modprobe ifb 2>/dev/null || true")
         self.run("ip link add ifb0 type ifb 2>/dev/null || true")
