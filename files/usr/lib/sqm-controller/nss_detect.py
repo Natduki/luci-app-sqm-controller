@@ -36,7 +36,7 @@ def _run(cmd):
 
 def get_board_model():
     """优先从设备树/系统文件读型号，失败则回退 ubus 查询。"""
-    for path in ("/proc/device-tree/model", "/tmp/sysinfo/model", "/proc/sys/kernel/hostname"):
+    for path in ("/proc/device-tree/model", "/tmp/sysinfo/model"):
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 value = f.read().strip().rstrip("\x00").strip()

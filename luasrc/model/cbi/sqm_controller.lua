@@ -19,7 +19,8 @@ local function get_basic_config_snapshot()
         interface = trim_uci_value(sys.exec("uci -q get sqm_controller.basic_config.interface 2>/dev/null")),
         download_speed = trim_uci_value(sys.exec("uci -q get sqm_controller.basic_config.download_speed 2>/dev/null")),
         upload_speed = trim_uci_value(sys.exec("uci -q get sqm_controller.basic_config.upload_speed 2>/dev/null")),
-        queue_algorithm = trim_uci_value(sys.exec("uci -q get sqm_controller.basic_config.queue_algorithm 2>/dev/null"))
+        queue_algorithm = trim_uci_value(sys.exec("uci -q get sqm_controller.basic_config.queue_algorithm 2>/dev/null")),
+        queue_backend = trim_uci_value(sys.exec("uci -q get sqm_controller.basic_config.queue_backend 2>/dev/null"))
     }
 end
 
@@ -300,6 +301,7 @@ function m.parse(self, ...)
             download_speed = trim_uci_value(self:formvalue("cbid.sqm_controller.basic_config.download_speed")),
             upload_speed = trim_uci_value(self:formvalue("cbid.sqm_controller.basic_config.upload_speed")),
             queue_algorithm = trim_uci_value(self:formvalue("cbid.sqm_controller.basic_config.queue_algorithm")),
+            queue_backend = trim_uci_value(self:formvalue("cbid.sqm_controller.basic_config.queue_backend")),
         }
     end
     m._basic_config_before = get_basic_config_snapshot()

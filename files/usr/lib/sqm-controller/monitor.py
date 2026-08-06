@@ -9,8 +9,9 @@ import time
 
 
 STATE_FILE = "/tmp/sqm_controller_monitor_state.json"
-STATE_FILE = "/tmp/sqm_controller_monitor_state.json"
-HISTORY_FILE = "/etc/sqm_controller/monitor_history.json"
+HISTORY_FILE = "/etc/sqm_controller/monitor_history.jsonl"
+MAX_POINTS = 2880
+COMPACT_AT = MAX_POINTS * 2
 MAX_POINTS = 2880
 WINDOW_SECONDS = {"1m": 60, "5m": 300, "1h": 3600}
 DEFAULT_PING_HOST = "223.5.5.5"
@@ -39,6 +40,40 @@ def _write_json(path, data):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     os.replace(tmp, path)
+
+
+def _read_history():
+    """读取监控历史：新格式 JSONL 按行解析；旧格式 JSON 数组整体解析（兼容迁移）。"""
+    if not os.path.exists(HISTORY_FILE):
+        return []
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            raw = f.read()
+    except Exception:
+        return []
+    if not raw:
+        return []
+    stripped = raw.lstrip()
+    history = []
+    if stripped.startswith("["):
+        # 旧版 JSON 数组
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+    # JSONL: 每行一个样本
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+            if isinstance(item, dict):
+                history.append(item)
+        except Exception:
+            continue
+    return history
 
 
 def _uci_get(option, default=None):
@@ -247,7 +282,7 @@ def collect_sample(iface):
     # 本次延迟探测失败时，沿用上一条有效延迟。
     # 如果历史里也没有有效值，就保持为空。
     if latency is None:
-        history = _read_json(HISTORY_FILE, [])
+        history = _read_history()
         latency = _last_valid_latency(history)
 
     next_state = {"iface": iface, "ts": ts, "total": total_bytes}
@@ -273,33 +308,47 @@ def collect_sample(iface):
 
 
 def append_history(sample):
-    history = _read_json(HISTORY_FILE, [])
-    if not isinstance(history, list):
-        history = []
-    history.append(sample)
-    if len(history) > MAX_POINTS:
-        history = history[-MAX_POINTS:]
-    _write_json(HISTORY_FILE, history)
-    return history
+    """JSONL 追加写入；行数超过阈值时压缩为最近 MAX_POINTS 条。"""
+    d = os.path.dirname(HISTORY_FILE)
+    if d and not os.path.isdir(d):
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
+    try:
+        with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+    except Exception:
+        return _read_history()
+    # 低频压缩：避免无限增长；间隔约 MAX_POINTS*2 条才全量重写一次
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            line_count = sum(1 for _ in f)
+    except Exception:
+        line_count = 0
+    if line_count > COMPACT_AT:
+        history = _read_history()[-MAX_POINTS:]
+        _write_json(HISTORY_FILE, history)
+    return _read_history()
 
 
 def get_window_history(window, include_current=True, sample=None):
+    """只读查询；include_current 时把当前样本并入内存返回，不写文件。"""
     if window not in WINDOW_SECONDS:
         window = "5m"
 
-    history = _read_json(HISTORY_FILE, [])
+    history = _read_history()
     if not isinstance(history, list):
         history = []
 
     if include_current and sample is not None:
-        history = append_history(sample)
+        history = history + [sample]
 
     now = int(time.time())
     cutoff = now - WINDOW_SECONDS[window]
     points = [p for p in history if isinstance(p, dict) and int(p.get("time", 0)) >= cutoff]
 
     return {"window": window, "points": points}
-
 
 def main():
     parser = argparse.ArgumentParser()

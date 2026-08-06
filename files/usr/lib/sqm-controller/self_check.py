@@ -158,12 +158,17 @@ def check_nss_tc_rules(settings):
     iface = str(settings.get("interface", "eth0") or "eth0").strip()
     out = run(["tc", "qdisc", "show", "dev", iface])
     text = (out.stdout or "") + (out.stderr or "")
-    ok = bool(re.search(r"nsstbl|nssfq_codel", text))
+    wan_hit = bool(re.search(r"nsstbl|nssfq_codel", text))
+    # 同时检查 ifb0（下载方向）
+    ifb_out = run(["tc", "qdisc", "show", "dev", "ifb0"])
+    ifb_text = (ifb_out.stdout or "") + (ifb_out.stderr or "")
+    ifb_hit = bool(re.search(r"nsstbl|nssfq_codel", ifb_text))
+    ok = wan_hit or ifb_hit
     return {
         "name": "nss_tc_rules",
         "ok": ok,
-        "detail": "nsstbl/nssfq_codel mounted" if ok else "nsstbl/nssfq_codel not found on " + iface,
-        "data": {"dev": iface, "qdisc": text[:2000]},
+        "detail": "nsstbl/nssfq_codel mounted (wan=%s ifb0=%s)" % (wan_hit, ifb_hit),
+        "data": {"dev": iface, "wan": wan_hit, "ifb0": ifb_hit, "qdisc": (text + ifb_text)[:2000]},
     }
 
 def check_interface(settings):

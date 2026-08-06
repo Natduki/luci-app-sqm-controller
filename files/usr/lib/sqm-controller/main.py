@@ -1485,6 +1485,14 @@ class SQMController:
 
         if not enabled:
             cleanup = self._clear_classifier_runtime()
+            # 同时停掉 NSS 模式可能遗留的 sqm-scripts 实例（/etc/config/sqm）
+            nss_cleanup = {}
+            try:
+                nss_cleanup = {"success": bool(TCManager(self.config).clear_sqm_runtime())}
+            except Exception as exc:
+                logging.exception("clear_sqm_runtime failed: %s", exc)
+                nss_cleanup = {"success": False, "error": str(exc)}
+            cleanup["nss_sqm"] = nss_cleanup
             return {
                 "requested": True,
                 "enabled": False,

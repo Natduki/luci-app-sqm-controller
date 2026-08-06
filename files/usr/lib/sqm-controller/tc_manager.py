@@ -11,7 +11,6 @@ import time
 
 import nss_detect
 
-import nss_detect
 
 # tc 命令参数全部走本地白名单校验，避免把异常值直接拼进 shell。
 _IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,15}$")
@@ -127,13 +126,14 @@ class TCManager:
 
         # 1) 写入 sqm 配置（独立 section，避免与用户 luci-app-sqm 配置互相覆盖）
         uci_cmds = [
+            "test -f /etc/config/sqm || touch /etc/config/sqm",
             "uci -q set sqm.sqm_controller=queue",
             f"uci -q set sqm.sqm_controller.interface='{self.interface}'",
-            f"uci -q set sqm.sqm_controller.enabled='1'",
+            "uci -q set sqm.sqm_controller.enabled='1'",
             f"uci -q set sqm.sqm_controller.download='{max(self.download_kbps, 0)}'",
             f"uci -q set sqm.sqm_controller.upload='{max(self.upload_kbps, 0)}'",
-            "uci -q set sqm.sqm_controller.qdisc='nss-zk.qos'",
-            "uci -q set sqm.sqm_controller.script='simple.qos'",
+            "uci -q set sqm.sqm_controller.qdisc='fq_codel'",
+            "uci -q set sqm.sqm_controller.script='nss-zk.qos'",
             "uci -q set sqm.sqm_controller.algorithm='fq_codel'",
             "uci -q commit sqm",
         ]
