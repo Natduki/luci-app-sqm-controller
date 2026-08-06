@@ -12,7 +12,6 @@ STATE_FILE = "/tmp/sqm_controller_monitor_state.json"
 HISTORY_FILE = "/etc/sqm_controller/monitor_history.jsonl"
 MAX_POINTS = 2880
 COMPACT_AT = MAX_POINTS * 2
-MAX_POINTS = 2880
 WINDOW_SECONDS = {"1m": 60, "5m": 300, "1h": 3600}
 DEFAULT_PING_HOST = "223.5.5.5"
 DEFAULT_PING_COUNT = 4
@@ -95,7 +94,7 @@ def _write_history_jsonl(history):
 
 
 def _migrate_legacy_history():
-    """若历史文件仍是旧版 JSON 数组，迁移为 JSONL（追加前调用）。"""
+    """若历史文件仍是旧版 JSON 数组，迁移为 JSONL（追加前调用）。空数组也迁移。"""
     try:
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             head = f.read(4096)
@@ -103,9 +102,9 @@ def _migrate_legacy_history():
         return
     if not head or not head.lstrip().startswith("["):
         return
+    # 合法旧 JSON 数组（含空数组 []）都迁移为 JSONL 格式
     history = _read_history()
-    if history:
-        _write_history_jsonl(history)
+    _write_history_jsonl(history)
 def _uci_get(option, default=None):
     out = subprocess.getoutput("uci -q get " + option + " 2>/dev/null").strip()
     return out if out else default

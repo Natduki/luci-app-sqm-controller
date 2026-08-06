@@ -113,22 +113,32 @@ class TCManager:
             self.run(cmd)
 
     def clear_sqm_runtime(self):
-        """停掉本插件在 sqm-scripts 中的 section（不动用户其他 section 的启用状态）。"""
-        self.run("uci -q set sqm.sqm_controller.enabled='0' 2>/dev/null")
-        self.run("uci -q commit sqm 2>/dev/null")
-        # restart 而非 stop：只让本插件 section 停用，用户其他 sqm section 保持原状
-        self.run("/etc/init.d/sqm restart 2>/dev/null || /etc/init.d/sqm stop 2>/dev/null || true")
+        """停掉本插件在 sqm-scripts 中的 section（仅当本插件 section 已启用时执行，不误动用户其他 section）。"""
+        # 先检查本插件 section 是否启用；不存在或未启用则无事可做
+        enabled_out = (self.run("uci -q get sqm.sqm_controller.enabled 2>/dev/null").stdout or "").strip()
+        if enabled_out != "1":
+            return True
+        result = self.run("uci -q set sqm.sqm_controller.enabled='0' 2>/dev/null")
+        if result.returncode != 0:
+            self.logger.error("clear_sqm_runtime: disable section failed rc=%s", result.returncode)
+            return False
+        result = self.run("uci -q commit sqm 2>/dev/null")
+        if result.returncode != 0:
+            self.logger.error("clear_sqm_runtime: commit failed rc=%s", result.returncode)
+            return False
+        # restart 让禁用生效（只有本插件 section 变化）；失败再试 stop
+        result = self.run("/etc/init.d/sqm restart 2>/dev/null")
+        if result.returncode != 0:
+            result = self.run("/etc/init.d/sqm stop 2>/dev/null")
+            if result.returncode != 0:
+                self.logger.error("clear_sqm_runtime: sqm stop failed rc=%s", result.returncode)
+                return False
         return True
 
     def setup_nss(self):
         """NSS 模式：桥接配置到 /etc/config/sqm 并调用 sqm-scripts 启动 nss-zk.qos。"""
         # 先清旧软件后端（HTB/IFB），避免残留队列干扰 NSS
         self.clear_tc_rules()
-        if self.upload_kbps <= 0 and self.download_kbps <= 0:
-            self._set_last_error_details(stage="setup-nss", error="no bandwidth configured")
-            return False
-    def setup_nss(self):
-        """NSS 模式：桥接配置到 /etc/config/sqm 并调用 sqm-scripts 启动 nss-zk.qos。"""
         if self.upload_kbps <= 0 and self.download_kbps <= 0:
             self._set_last_error_details(stage="setup-nss", error="no bandwidth configured")
             return False
