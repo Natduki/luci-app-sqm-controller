@@ -8,13 +8,15 @@ import subprocess
 import time
 
 
-PING_HOST = "8.8.8.8"
 STATE_FILE = "/tmp/sqm_controller_monitor_state.json"
-HISTORY_FILE = "/tmp/sqm_controller_monitor_history.json"
-MAX_POINTS = 900
+STATE_FILE = "/tmp/sqm_controller_monitor_state.json"
+HISTORY_FILE = "/etc/sqm_controller/monitor_history.json"
+MAX_POINTS = 2880
 WINDOW_SECONDS = {"1m": 60, "5m": 300, "1h": 3600}
-PING_COUNT = 4
-PING_TIMEOUT = 1
+DEFAULT_PING_HOST = "223.5.5.5"
+DEFAULT_PING_COUNT = 4
+DEFAULT_PING_TIMEOUT = 1
+PING_HOST_PATTERN = re.compile(r"^[A-Za-z0-9.:_-]+$")
 
 
 def _read_json(path, default):
@@ -27,10 +29,38 @@ def _read_json(path, default):
 
 
 def _write_json(path, data):
+    d = os.path.dirname(path)
+    if d and not os.path.isdir(d):
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     os.replace(tmp, path)
+
+
+def _uci_get(option, default=None):
+    out = subprocess.getoutput("uci -q get " + option + " 2>/dev/null").strip()
+    return out if out else default
+
+
+def get_ping_config():
+    host = _uci_get("sqm_controller.monitor.ping_host", DEFAULT_PING_HOST)
+    if not host or not PING_HOST_PATTERN.match(host):
+        host = DEFAULT_PING_HOST
+    try:
+        count = int(_uci_get("sqm_controller.monitor.ping_count", str(DEFAULT_PING_COUNT)) or DEFAULT_PING_COUNT)
+    except ValueError:
+        count = DEFAULT_PING_COUNT
+    count = max(1, min(count, 10))
+    try:
+        timeout = int(_uci_get("sqm_controller.monitor.ping_timeout", str(DEFAULT_PING_TIMEOUT)) or DEFAULT_PING_TIMEOUT)
+    except ValueError:
+        timeout = DEFAULT_PING_TIMEOUT
+    timeout = max(1, min(timeout, 5))
+    return host, count, timeout
 
 
 def get_iface_total_bytes(iface):
@@ -67,10 +97,10 @@ def get_bandwidth_kbps(iface, ts, state):
     return round(max(kbps, 0.0), 2), total
 
 
-def get_ping_stats(host=PING_HOST):
+def get_ping_stats(host, count=DEFAULT_PING_COUNT, timeout=DEFAULT_PING_TIMEOUT):
     # 采样保持轻量，避免拖慢页面刷新。
-    # 这里固定发 4 个探测包，丢包粒度能细到 25%。
-    out = subprocess.getoutput(f"ping -c {PING_COUNT} -W {PING_TIMEOUT} {host} 2>/dev/null")
+    # 这里默认发 4 个探测包，丢包粒度能细到 25%。
+    out = subprocess.getoutput(f"ping -c {count} -W {timeout} {host} 2>/dev/null")
 
     loss = 100
     m_loss = re.search(r"(\d+)% packet loss", out)
@@ -208,7 +238,8 @@ def collect_sample(iface):
     ts = int(time.time())
     state = _read_json(STATE_FILE, {})
     bandwidth_kbps, total_bytes = get_bandwidth_kbps(iface, ts, state)
-    latency, loss = get_ping_stats()
+    ping_host, ping_count, ping_timeout = get_ping_config()
+    latency, loss = get_ping_stats(ping_host, ping_count, ping_timeout)
     cpu_usage, load1, cpu_total, cpu_idle = get_cpu_usage(state)
     memory_used_mb, memory_total_mb, memory_usage = get_memory_usage()
     temperature_c = get_temperature_c()

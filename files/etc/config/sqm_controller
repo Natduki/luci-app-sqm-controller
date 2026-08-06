@@ -214,3 +214,8 @@ config policy 'policy'
         option gaming_floor_pct '15'
         option streaming_floor_pct '25'
         option cooldown_min '2'
+
+config monitor 'monitor'
+	option ping_host '223.5.5.5'
+	option ping_count '4'
+	option ping_timeout '1'

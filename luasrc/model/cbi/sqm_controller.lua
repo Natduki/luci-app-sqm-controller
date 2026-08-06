@@ -207,6 +207,24 @@ log_level.default = "info"
 log_file = advanced:option(Value, "log_file", translate("日志文件路径"))
 log_file.default = "/var/log/sqm_controller.log"
 
+
+monitor = m:section(NamedSection, "monitor", "monitor", translate("监控设置"))
+monitor.addremove = false
+
+ping_host = monitor:option(Value, "ping_host", translate("延迟采样目标"))
+ping_host.default = "223.5.5.5"
+ping_host.rmempty = false
+ping_host.description = translate("实时监控的 ping 探测目标。国内建议 223.5.5.5 或 114.114.114.114，国外可用 8.8.8.8。")
+
+ping_count = monitor:option(Value, "ping_count", translate("探测包数量"))
+ping_count.default = 4
+ping_count.rmempty = false
+ping_count.datatype = "range(1,10)"
+
+ping_timeout = monitor:option(Value, "ping_timeout", translate("探测超时(秒)"))
+ping_timeout.default = 1
+ping_timeout.rmempty = false
+ping_timeout.datatype = "range(1,5)"
 local function sync_basic_runtime(hook_name, requested)
     local before = m._basic_config_before or get_basic_config_snapshot()
     local after = get_basic_config_snapshot()
