@@ -246,7 +246,7 @@ monitor.addremove = false
 ping_host = monitor:option(Value, "ping_host", translate("延迟采样目标"))
 ping_host.default = "223.5.5.5"
 ping_host.rmempty = false
-ping_host.description = '<div style="margin-top:-0.35em;">' .. translate("实时监控的 ping 探测目标。国内建议 223.5.5.5 或 114.114.114.114，国外可用 8.8.8.8。") .. '</div>'
+ping_host.description = '<div style="margin-top:-0.5em;">' .. translate("实时监控的 ping 探测目标。国内建议 223.5.5.5 或 114.114.114.114，国外可用 8.8.8.8。") .. '</div>'
 
 ping_count = monitor:option(Value, "ping_count", translate("探测包数量"))
 ping_count.default = 4
