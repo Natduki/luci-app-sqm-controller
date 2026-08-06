@@ -1484,17 +1484,8 @@ class SQMController:
             self.config["enabled"] = enabled
 
         if not enabled:
-            cleanup = self._clear_classifier_runtime()
-            # 同时停掉 NSS 模式可能遗留的 sqm-scripts 实例（/etc/config/sqm）
-            nss_cleanup = {}
-            try:
-                nss_cleanup = {"success": bool(TCManager(self.config).clear_sqm_runtime())}
-            except Exception as exc:
-                logging.exception("clear_sqm_runtime failed: %s", exc)
-                nss_cleanup = {"success": False, "error": str(exc)}
-            cleanup["nss_sqm"] = nss_cleanup
-            # 综合判定：分类清理 + NSS 清理都必须成功
-            all_ok = bool(cleanup.get("success")) and bool(nss_cleanup.get("success"))
+            cleanup = self._full_runtime_cleanup()
+            all_ok = bool(cleanup.get("success"))
             return {
                 "requested": True,
                 "enabled": False,
@@ -1604,6 +1595,22 @@ class SQMController:
         result["success"] = len(result["errors"]) == 0
         return result
 
+    def _full_runtime_cleanup(self):
+        """统一清理：分类运行时（firewall + tc）+ NSS sqm section。
+        由 disable()、_apply_runtime_config(enabled=False)、enable() 失败回滚三条路径共用。"""
+        cleanup = self._clear_classifier_runtime()
+        nss_cleanup = {}
+        try:
+            nss_cleanup = {"success": bool(TCManager(self.config).clear_sqm_runtime())}
+        except Exception as exc:
+            logging.exception("clear_sqm_runtime failed: %s", exc)
+            nss_cleanup = {"success": False, "error": str(exc)}
+        cleanup["nss_sqm"] = nss_cleanup
+        if not nss_cleanup.get("success"):
+            cleanup.setdefault("errors", []).append(f"nss_sqm: {nss_cleanup.get('error', 'clear failed')}")
+        cleanup["success"] = bool(cleanup.get("success")) and bool(nss_cleanup.get("success"))
+        return cleanup
+
     def _managed_tc_runtime_state(self):
         self._reload_config(force=True)
         iface = _validate_iface_main(self.config_manager.get_interface(), "interface")
@@ -1647,7 +1654,7 @@ class SQMController:
                 result["error"] = "enabled but failed to save config"
             return result
 
-        cleanup = self._clear_classifier_runtime()
+        cleanup = self._full_runtime_cleanup()
         self.config_manager.set_value("enabled", False, "basic_config")
         saved = self.config_manager.save_config()
         result["cleanup"] = cleanup
@@ -1665,7 +1672,7 @@ class SQMController:
 
     def disable(self):
         logging.info("disable() called")
-        cleanup = self._clear_classifier_runtime()
+        cleanup = self._full_runtime_cleanup()
         runtime_state = self._managed_tc_runtime_state()
         runtime_cleared = not runtime_state.get("running")
         if not runtime_cleared:
