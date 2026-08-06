@@ -79,7 +79,7 @@ def detect_nss(use_cache=True):
             result = {
                 "available": False,
                 "model": model or "未知",
-                "reason": "非 IPQ807x 平台（当前设备: %s），NSS 硬件加速不可用" % (model or "未知"),
+                "reason": "非 IPQ807x 平台，NSS 硬件加速不可用",
             }
         elif not NSS_KMOD_PATTERN.search(_run("lsmod")):
             result = {

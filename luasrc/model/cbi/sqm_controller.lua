@@ -201,7 +201,7 @@ do
     elseif resolved == "nss" then
         queue_backend.description = '<span style="color:#2e7d32;">' .. translate("当前设备支持 NSS 硬件加速（") .. util.pcdata(device) .. translate("），自动模式将使用硬件队列。") .. '</span><br/>' .. queue_backend.description
     else
-        queue_backend.description = translate("当前设备：") .. util.pcdata(device ~= "" and device or translate("未知")) .. translate("。") .. tostring(nss_info.reason or "") .. '<br/>' .. queue_backend.description
+        queue_backend.description = tostring(nss_info.reason or "") .. '<br/>' .. queue_backend.description
     end
 end
 policy = m:section(NamedSection, "policy", "policy", translate("策略设置"))
