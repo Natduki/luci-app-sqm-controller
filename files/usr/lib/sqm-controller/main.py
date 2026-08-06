@@ -1493,12 +1493,14 @@ class SQMController:
                 logging.exception("clear_sqm_runtime failed: %s", exc)
                 nss_cleanup = {"success": False, "error": str(exc)}
             cleanup["nss_sqm"] = nss_cleanup
+            # 综合判定：分类清理 + NSS 清理都必须成功
+            all_ok = bool(cleanup.get("success")) and bool(nss_cleanup.get("success"))
             return {
                 "requested": True,
                 "enabled": False,
-                "applied": bool(cleanup.get("success")),
-                "restart_success": bool(cleanup.get("success")),
-                "message": "service disabled, runtime cleared" if cleanup.get("success") else "service disabled, runtime clear failed",
+                "applied": all_ok,
+                "restart_success": all_ok,
+                "message": "service disabled, runtime cleared" if all_ok else "service disabled, runtime clear failed",
                 "cleanup": cleanup,
             }
 

@@ -126,13 +126,12 @@ class TCManager:
         if result.returncode != 0:
             self.logger.error("clear_sqm_runtime: commit failed rc=%s", result.returncode)
             return False
-        # restart 让禁用生效（只有本插件 section 变化）；失败再试 stop
+        # restart 让禁用生效（只影响本插件 section 的启用状态）
         result = self.run("/etc/init.d/sqm restart 2>/dev/null")
         if result.returncode != 0:
-            result = self.run("/etc/init.d/sqm stop 2>/dev/null")
-            if result.returncode != 0:
-                self.logger.error("clear_sqm_runtime: sqm stop failed rc=%s", result.returncode)
-                return False
+            # 不执行全局 stop：避免误停用户其他 SQM section，直接向上报失败
+            self.logger.error("clear_sqm_runtime: sqm restart failed rc=%s", result.returncode)
+            return False
         return True
 
     def setup_nss(self):
@@ -192,7 +191,10 @@ class TCManager:
             return ok, "nss", info
 
         # software 模式：先停掉 NSS 可能遗留的 sqm 实例，再清 tc 建 HTB
-        self.clear_sqm_runtime()
+        if not self.clear_sqm_runtime():
+            # 旧 NSS 清理失败：不继续建 HTB，避免新旧队列并存，向上层传播失败
+            self.logger.error("software setup aborted: clear_sqm_runtime failed")
+            return False, "software", dict(info, error="NSS 旧队列清理失败，未启动软件队列")
         ok = self.setup_htb()
         return ok, "software", info
     def setup_ifb(self):

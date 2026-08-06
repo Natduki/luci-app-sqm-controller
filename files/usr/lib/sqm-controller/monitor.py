@@ -5,6 +5,7 @@ import os
 import glob
 import re
 import subprocess
+import sys
 import time
 
 
@@ -76,13 +77,13 @@ def _read_history():
 
 
 def _write_history_jsonl(history):
-    """逐行写 JSONL（压缩/迁移专用，绝不写 JSON 数组）。"""
+    """逐行写 JSONL（压缩/迁移专用，绝不写 JSON 数组）。返回 bool 表示是否成功。"""
     d = os.path.dirname(HISTORY_FILE)
     if d and not os.path.isdir(d):
         try:
             os.makedirs(d, exist_ok=True)
         except Exception:
-            pass
+            return False
     tmp = HISTORY_FILE + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -90,21 +91,25 @@ def _write_history_jsonl(history):
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
         os.replace(tmp, HISTORY_FILE)
     except Exception:
-        pass
+        return False
+    return True
 
 
 def _migrate_legacy_history():
-    """若历史文件仍是旧版 JSON 数组，迁移为 JSONL（追加前调用）。空数组也迁移。"""
+    """若历史文件仍是旧版 JSON 数组，迁移为 JSONL（追加前调用）。空数组也迁移。
+    返回 True=无需迁移或迁移成功；False=迁移失败（调用方应停止追加，避免混合格式）。"""
     try:
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             head = f.read(4096)
+    except FileNotFoundError:
+        return True
     except Exception:
-        return
+        return False
     if not head or not head.lstrip().startswith("["):
-        return
+        return True
     # 合法旧 JSON 数组（含空数组 []）都迁移为 JSONL 格式
     history = _read_history()
-    _write_history_jsonl(history)
+    return _write_history_jsonl(history)
 def _uci_get(option, default=None):
     out = subprocess.getoutput("uci -q get " + option + " 2>/dev/null").strip()
     return out if out else default
@@ -338,7 +343,10 @@ def collect_sample(iface):
 
 def append_history(sample):
     """JSONL 追加写入；追加前迁移旧格式；行数超阈值时压缩为最近 MAX_POINTS 条。"""
-    _migrate_legacy_history()
+    if not _migrate_legacy_history():
+        # 迁移失败：停止追加，避免向旧数组末尾混写 JSONL 造成格式损坏
+        print("monitor: legacy history migration failed, append skipped", file=sys.stderr)
+        return _read_history()
     d = os.path.dirname(HISTORY_FILE)
     if d and not os.path.isdir(d):
         try:
@@ -358,7 +366,8 @@ def append_history(sample):
         line_count = 0
     if line_count > COMPACT_AT:
         history = _read_history()[-MAX_POINTS:]
-        _write_history_jsonl(history)
+        if not _write_history_jsonl(history):
+            print("monitor: history compaction failed (format remains JSONL)", file=sys.stderr)
     return _read_history()
 
 
