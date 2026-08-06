@@ -13,6 +13,9 @@ CRON_FILE="/etc/crontabs/root"
 CRON_TAG="sqm-controller-policy"
 CRON_MARK="# $CRON_TAG"
 POLICY_CMD="/usr/bin/python3 /usr/lib/sqm-controller/main.py --policy-once"
+MONITOR_CRON_TAG="sqm-controller-monitor"
+MONITOR_CRON_MARK="# $MONITOR_CRON_TAG"
+MONITOR_CMD="/usr/bin/python3 /usr/lib/sqm-controller/main.py --monitor >/dev/null 2>&1"
 
 set_enabled_state() {
     local value
@@ -80,6 +83,51 @@ remove_policy_cron() {
     return 0
 }
 
+remove_monitor_cron() {
+    local tmp
+    tmp="${CRON_FILE}.tmp.$$"
+
+    [ -f "$CRON_FILE" ] || return 0
+    if ! grep -Fv "$MONITOR_CRON_MARK" "$CRON_FILE" > "$tmp" 2>/dev/null; then
+        : > "$tmp"
+    fi
+    if ! mv "$tmp" "$CRON_FILE" 2>/dev/null; then
+        rm -f "$tmp"
+        echo "warn: failed to remove monitor cron"
+        return 1
+    fi
+    reload_cron_service
+    return 0
+}
+
+sync_monitor_cron() {
+    local enabled line tmp
+    enabled="$(uci -q get sqm_controller.basic_config.enabled 2>/dev/null)"
+    if [ "$enabled" != "1" ]; then
+        remove_monitor_cron
+        return $?
+    fi
+    line="* * * * * $MONITOR_CMD $MONITOR_CRON_MARK"
+    tmp="${CRON_FILE}.tmp.$$"
+
+    [ -f "$CRON_FILE" ] || : > "$CRON_FILE" 2>/dev/null || return 1
+    if ! grep -Fv "$MONITOR_CRON_MARK" "$CRON_FILE" > "$tmp" 2>/dev/null; then
+        : > "$tmp"
+    fi
+    echo "$line" >> "$tmp" 2>/dev/null || {
+        rm -f "$tmp"
+        echo "warn: failed to append monitor cron"
+        return 1
+    }
+    if ! mv "$tmp" "$CRON_FILE" 2>/dev/null; then
+        rm -f "$tmp"
+        echo "warn: failed to update monitor cron"
+        return 1
+    fi
+    reload_cron_service
+    return 0
+}
+
 sync_policy_cron() {
     local enabled expr line tmp expr_clean
 
@@ -132,7 +180,12 @@ sync_policy_cron() {
 }
 
 sync_policy_cron_service() {
+    local policy_rc monitor_rc
     sync_policy_cron
+    policy_rc=$?
+    sync_monitor_cron
+    monitor_rc=$?
+    [ $policy_rc -eq 0 ] && [ $monitor_rc -eq 0 ]
 }
 
 extra_command "sync_policy_cron_service" "Synchronize policy cron job"
@@ -153,6 +206,7 @@ start_service() {
     enable_rc=$?
     if [ $enable_rc -ne 0 ]; then
         remove_policy_cron >/dev/null 2>&1 || true
+        remove_monitor_cron >/dev/null 2>&1 || true
         [ -n "$enable_out" ] && echo "$enable_out"
         return $enable_rc
     fi
@@ -161,12 +215,14 @@ start_service() {
         echo "warn: failed to persist enabled=1"
         "$PYTHON" "$APP" --disable >/dev/null 2>&1 || true
         remove_policy_cron >/dev/null 2>&1 || true
+        remove_monitor_cron >/dev/null 2>&1 || true
         [ -n "$enable_out" ] && echo "$enable_out"
         return 1
     fi
 
     [ -n "$enable_out" ] && echo "$enable_out"
     sync_policy_cron || echo "warn: failed to sync policy cron"
+    sync_monitor_cron || echo "warn: failed to sync monitor cron"
     return 0
 }
 
@@ -186,6 +242,7 @@ stop_service() {
     fi
 
     remove_policy_cron || echo "warn: failed to remove policy cron"
+    remove_monitor_cron || echo "warn: failed to remove monitor cron"
     return 0
 }
 

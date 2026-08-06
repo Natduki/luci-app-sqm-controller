@@ -34,7 +34,7 @@ end
 
 local function restore_basic_config(snapshot)
     local rc = 0
-    local options = { "enabled", "interface", "download_speed", "upload_speed", "queue_algorithm" }
+    local options = { "enabled", "interface", "download_speed", "upload_speed", "queue_algorithm", "queue_backend" }
     for _, option in ipairs(options) do
         rc = rc + set_basic_config_value(option, snapshot[option])
     end
@@ -183,10 +183,10 @@ queue_backend.default = "auto"
 queue_backend.description = translate("自动检测：IPQ807x 且检测到 NSS 模块时自动使用硬件加速队列，其余设备用软件模式。") .. '<br/>' .. translate("软件模式支持业务分类/策略中心；NSS 模式仅带宽整形+监控（不支持分类）。")
 
 -- 动态渲染 NSS 检测结果（页面加载时执行，供用户在选择后端时参考）
+local nss_info = {}
 do
     local cfg_backend = tostring(trim_uci_value(sys.exec("uci -q get sqm_controller.basic_config.queue_backend 2>/dev/null")) or "auto")
     local detect_out = sys.exec("python3 /usr/lib/sqm-controller/nss_detect.py " .. util.shellquote(cfg_backend) .. " 2>/dev/null")
-    local nss_info = {}
     if detect_out and detect_out ~= "" then
         local ok_parse, parsed = pcall(jsonc.parse, detect_out)
         if ok_parse and type(parsed) == "table" then
@@ -204,6 +204,15 @@ do
     else
         queue_backend.description = tostring(nss_info.reason or "") .. '<br/>' .. queue_backend.description
     end
+end
+
+queue_backend.validate = function(self, value, section)
+    value = tostring(value or "auto")
+    if value == "nss" and nss_info.available ~= true then
+        local reason = tostring(nss_info.reason or "当前设备未通过 NSS 可用性检测")
+        return nil, translate("无法启用 NSS 硬件模式：") .. reason
+    end
+    return value
 end
 policy = m:section(NamedSection, "policy", "policy", translate("策略设置"))
 policy.addremove = false
@@ -320,6 +329,8 @@ function m.parse(self, ...)
 
     return rv
 end
+
+m:append(Template("sqm_controller/settings_style"))
 
 return m
 

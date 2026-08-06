@@ -13,7 +13,7 @@ STATE_FILE = "/tmp/sqm_controller_monitor_state.json"
 HISTORY_FILE = "/etc/sqm_controller/monitor_history.jsonl"
 MAX_POINTS = 2880
 COMPACT_AT = MAX_POINTS * 2
-WINDOW_SECONDS = {"1m": 60, "5m": 300, "1h": 3600}
+WINDOW_SECONDS = {"1m": 60, "5m": 300, "1h": 3600, "6h": 21600, "24h": 86400}
 DEFAULT_PING_HOST = "223.5.5.5"
 DEFAULT_PING_COUNT = 4
 DEFAULT_PING_TIMEOUT = 1
@@ -132,7 +132,7 @@ def get_ping_config():
     return host, count, timeout
 
 
-def get_iface_total_bytes(iface):
+def get_iface_bytes(iface):
     rx_path = f"/sys/class/net/{iface}/statistics/rx_bytes"
     tx_path = f"/sys/class/net/{iface}/statistics/tx_bytes"
     try:
@@ -140,17 +140,22 @@ def get_iface_total_bytes(iface):
             rx = int((f.read() or "0").strip())
         with open(tx_path, "r", encoding="utf-8") as f:
             tx = int((f.read() or "0").strip())
-        return rx + tx
+        return rx, tx
     except Exception:
-        return 0
+        return 0, 0
 
 
 def get_bandwidth_kbps(iface, ts, state):
-    total = get_iface_total_bytes(iface)
+    rx, tx = get_iface_bytes(iface)
+    total = rx + tx
     prev_ts = state.get("ts")
     prev_total = state.get("total")
+    prev_rx = state.get("rx")
+    prev_tx = state.get("tx")
     prev_iface = state.get("iface")
     kbps = 0.0
+    rx_kbps = 0.0
+    tx_kbps = 0.0
 
     if (
         prev_iface == iface
@@ -163,7 +168,19 @@ def get_bandwidth_kbps(iface, ts, state):
         delta_seconds = ts - float(prev_ts)
         kbps = delta_bits / delta_seconds / 1000.0 if delta_seconds > 0 else 0.0
 
-    return round(max(kbps, 0.0), 2), total
+        if isinstance(prev_rx, int) and rx >= prev_rx:
+            rx_kbps = (rx - prev_rx) * 8.0 / delta_seconds / 1000.0
+        if isinstance(prev_tx, int) and tx >= prev_tx:
+            tx_kbps = (tx - prev_tx) * 8.0 / delta_seconds / 1000.0
+
+    return (
+        round(max(kbps, 0.0), 2),
+        round(max(rx_kbps, 0.0), 2),
+        round(max(tx_kbps, 0.0), 2),
+        rx,
+        tx,
+        total,
+    )
 
 
 def get_ping_stats(host, count=DEFAULT_PING_COUNT, timeout=DEFAULT_PING_TIMEOUT):
@@ -285,41 +302,23 @@ def get_temperature_c():
     return round(max(values), 1)
 
 
-def _last_valid_latency(history):
-    if not isinstance(history, list):
-        return None
-    for item in reversed(history):
-        if not isinstance(item, dict):
-            continue
-        value = item.get("latency")
-        if value is None:
-            continue
-        try:
-            value = float(value)
-        except Exception:
-            continue
-        if value >= 0:
-            return round(value, 3)
-    return None
-
-
 def collect_sample(iface):
     ts = int(time.time())
     state = _read_json(STATE_FILE, {})
-    bandwidth_kbps, total_bytes = get_bandwidth_kbps(iface, ts, state)
+    bandwidth_kbps, rx_kbps, tx_kbps, rx_bytes, tx_bytes, total_bytes = get_bandwidth_kbps(iface, ts, state)
     ping_host, ping_count, ping_timeout = get_ping_config()
     latency, loss = get_ping_stats(ping_host, ping_count, ping_timeout)
     cpu_usage, load1, cpu_total, cpu_idle = get_cpu_usage(state)
     memory_used_mb, memory_total_mb, memory_usage = get_memory_usage()
     temperature_c = get_temperature_c()
 
-    # 本次延迟探测失败时，沿用上一条有效延迟。
-    # 如果历史里也没有有效值，就保持为空。
-    if latency is None:
-        history = _read_history()
-        latency = _last_valid_latency(history)
-
-    next_state = {"iface": iface, "ts": ts, "total": total_bytes}
+    next_state = {
+        "iface": iface,
+        "ts": ts,
+        "rx": rx_bytes,
+        "tx": tx_bytes,
+        "total": total_bytes,
+    }
     if cpu_total is not None:
         next_state["cpu_total"] = cpu_total
     if cpu_idle is not None:
@@ -330,6 +329,8 @@ def collect_sample(iface):
         "time": ts,
         "bandwidth_kbps": bandwidth_kbps,
         "bandwidth": bandwidth_kbps,
+        "rx_kbps": rx_kbps,
+        "tx_kbps": tx_kbps,
         "latency": latency,
         "loss": loss,
         "cpu_usage": cpu_usage,
@@ -393,7 +394,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--iface", default="eth0")
     parser.add_argument("--history", action="store_true")
-    parser.add_argument("--window", choices=["1m", "5m", "1h"], default="5m")
+    parser.add_argument("--window", choices=["1m", "5m", "1h", "6h", "24h"], default="5m")
     parser.add_argument("--record", action="store_true")
     args = parser.parse_args()
 

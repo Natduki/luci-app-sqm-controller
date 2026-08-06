@@ -205,7 +205,7 @@ end
 
 function action_get_monitor_history()
     local window = http.formvalue("window") or "5m"
-    if window ~= "1m" and window ~= "5m" and window ~= "1h" then
+    if window ~= "1m" and window ~= "5m" and window ~= "1h" and window ~= "6h" and window ~= "24h" then
         window = "5m"
     end
 

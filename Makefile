@@ -3,12 +3,12 @@ include $(TOPDIR)/rules.mk
 # LuCI package metadata
 PKG_NAME:=luci-app-sqm-controller
 PKG_VERSION:=4.0.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=vaidurya.zws@qq.com
 
 LUCI_TITLE:=SQM Controller Web Interface
-LUCI_DESCRIPTION:=Smart Queue Management (SQM) controller with LuCI web interface
+LUCI_DESCRIPTION:=Smart Queue Management controller with LuCI, persistent monitoring and optional IPQ807x NSS backend
 LUCI_PKGARCH:=all
 
 # Runtime dependencies used by the LuCI pages, Python backend and tc/nft helpers.
@@ -38,6 +38,8 @@ define Package/$(PKG_NAME)/install
 
 	# LuCI views
 	$(INSTALL_DATA) ./luasrc/view/sqm_controller/help.htm \
+		$(1)/usr/lib/lua/luci/view/sqm_controller/
+	$(INSTALL_DATA) ./luasrc/view/sqm_controller/settings_style.htm \
 		$(1)/usr/lib/lua/luci/view/sqm_controller/
 	$(INSTALL_DATA) ./luasrc/view/sqm_controller/logs.htm \
 		$(1)/usr/lib/lua/luci/view/sqm_controller/
@@ -72,6 +74,8 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_BIN) ./files/usr/lib/sqm-controller/main.py \
 		$(1)/usr/lib/sqm-controller/
 	$(INSTALL_BIN) ./files/usr/lib/sqm-controller/tc_manager.py \
+		$(1)/usr/lib/sqm-controller/
+	$(INSTALL_BIN) ./files/usr/lib/sqm-controller/nss_detect.py \
 		$(1)/usr/lib/sqm-controller/
 	$(INSTALL_BIN) ./files/usr/lib/sqm-controller/monitor.py \
 		$(1)/usr/lib/sqm-controller/

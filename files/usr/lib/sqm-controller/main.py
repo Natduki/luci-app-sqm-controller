@@ -1845,7 +1845,7 @@ class SQMController:
     def monitor_history_json(self, window):
         self._reload_config(force=True)
         iface = self.config_manager.get_interface()
-        if window not in {"1m", "5m", "1h"}:
+        if window not in {"1m", "5m", "1h", "6h", "24h"}:
             window = "5m"
         logging.info("monitor_history_json() iface=%s window=%s", iface, window)
         result = _run_with_timeout(
@@ -2291,7 +2291,7 @@ def main():
     parser.add_argument("--status-json", action="store_true")
     parser.add_argument("--monitor", action="store_true")
     parser.add_argument("--monitor-history", action="store_true")
-    parser.add_argument("--window", choices=["1m", "5m", "1h"], default="5m")
+    parser.add_argument("--window", choices=["1m", "5m", "1h", "6h", "24h"], default="5m")
     parser.add_argument("--speedtest", action="store_true")
     parser.add_argument("--rotate-logs", action="store_true")
     parser.add_argument("--self-check", action="store_true")
